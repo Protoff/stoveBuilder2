@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проектировщик дровяной печи из кирпичей</title>
+<link rel="stylesheet" href="css/app/style.css">
+</head>
+<body>
+<div id="viewport"></div>
+
+<div id="badge">Базовый модуль: <b>0.625</b> юнита = <b>62.5 мм</b> · кирпич <b>250×125×65</b> · ряд <b>65 мм</b></div>
+
+<div id="sidebar">
+  <h1>Дровяная печь из кирпичей</h1>
+  <div class="sub">3D-конструктор · кирпич 250×125×65 мм · 1 юнит = 100 мм · новый кирпич встаёт рядом с существующими</div>
+
+  <h2>Кирпичи</h2>
+  <button id="btn-add" class="btn primary" type="button">Создать кирпич</button>
+  <button id="btn-add-half" class="btn" type="button">Создать половинный кирпич</button>
+  <button id="btn-delete" class="btn danger" type="button" disabled>Удалить выделенный</button>
+
+  <h2>Проект (.stove / YAML)</h2>
+  <button id="btn-save" class="btn success" type="button">Сохранить проект</button>
+  <button id="btn-load" class="btn" type="button">Загрузить проект</button>
+  <input type="file" id="file-input" accept=".stove,.yaml,.yml" style="display:none">
+
+  <h2>Состояние</h2>
+  <div id="count" class="stat">Кирпичей на сцене: 0</div>
+  <div id="info" class="info">Ничего не выделено.<br>Кликните по кирпичу левой кнопкой.</div>
+
+  <h2>Памятка по управлению</h2>
+  <ul class="help">
+    <li><kbd>ЛКМ</kbd> по кирпичу — выделить; тянуть — переставить по сетке</li>
+    <li><kbd>ПКМ</kbd> — вращать камеру, <kbd>колесо</kbd> — масштаб</li>
+    <li><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> — вращение камеры</li>
+    <li><kbd>C</kbd> — создать кирпич (дубль кнопки «Создать кирпич»)</li>
+    <li>При перетаскивании: <kbd>Shift</kbd> + движение мыши — подъём/спуск по оси Y; <kbd>колесо</kbd> — шаг на ряд (65 мм)</li>
+    <li><kbd>X</kbd> — поворот вокруг оси X на 90°</li>
+    <li><kbd>Y</kbd> или <kbd>R</kbd> — поворот вокруг оси Y на 90°</li>
+    <li><kbd>Z</kbd> — поворот вокруг оси Z на 90°</li>
+    <li><kbd>PageUp</kbd> / <kbd>PageDown</kbd> — поднять/опустить выделенный кирпич на ряд</li>
+    <li><kbd>Delete</kbd> / <kbd>Backspace</kbd> — удалить выделенный кирпич</li>
+    <li><kbd>Esc</kbd> — снять выделение</li>
+  </ul>
+  <div class="note">
+    Новый кирпич появляется рядом с существующими, не перекрывая их.
+    При отпускании мыши кирпич встаёт на сетку 62.5 мм (края — точно на линии)
+    и примагничивается к соседям: встык, выравнивание граней, постановка сверху.
+    Высота ряда — строго 65 мм, кирпичи не врезаются друг в друга.
+    Клик по пустому месту снимает выделение.
+  </div>
+</div>
+
+<script src="js/libs/three.min.js"></script>
+<script src="js/libs/OrbitControls.js"></script>
+<script src="js/libs/js-yaml.min.js"></script>
+<script src="js/app/app.js"></script>
+</body>
+</html>
