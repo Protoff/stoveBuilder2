@@ -39,6 +39,9 @@
   .btn.danger:hover { background: #6b3232; }
   .btn.danger:disabled { background: #2a2f38; border-color: #3b4453; }
 
+  .history-row { display: flex; gap: 8px; }
+  .history-row .btn { flex: 1; padding: 6px 8px; font-size: 13px; text-align: center; }
+
   .stat { font-size: 14px; color: #cfd6de; margin-bottom: 8px; }
   .info {
     font-size: 13px; line-height: 1.55; color: #aeb8c4;
@@ -64,6 +67,17 @@
   }
   #badge b { color: #ffb454; font-weight: 600; }
 
+  #help-corner {
+    position: absolute; right: 14px; bottom: 12px; z-index: 5;
+    max-width: 282px; padding: 10px 14px;
+    background: rgba(20, 24, 31, 0.82); border: 1px solid #323a46;
+    border-radius: 8px; pointer-events: none; user-select: none;
+  }
+  #help-corner .help { font-size: 11.5px; line-height: 1.4; }
+  #help-corner .help li { margin-bottom: 4px; }
+  #help-corner kbd { font-size: 10.5px; }
+
   @media (max-width: 720px) {
     #sidebar { width: 100%; height: auto; bottom: auto; max-height: 45%; border-right: none; border-bottom: 1px solid #323a46; }
+    #help-corner { display: none; }
   }

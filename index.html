@@ -24,25 +24,21 @@
   <button id="btn-save" class="btn success" type="button">Сохранить проект</button>
   <button id="btn-load" class="btn" type="button">Загрузить проект</button>
   <input type="file" id="file-input" accept=".stove,.yaml,.yml" style="display:none">
+  <button id="btn-clear" class="btn danger" type="button">Очистить всё</button>
+
+  <h2>История</h2>
+  <div class="history-row">
+    <button id="btn-undo" class="btn" type="button" disabled>◀ Отменить</button>
+    <button id="btn-redo" class="btn" type="button" disabled>Вперед ▶</button>
+  </div>
+
+  <h2>Порядовка (PDF)</h2>
+  <button id="btn-pdf" class="btn primary" type="button">Скачать порядовку (PDF)</button>
 
   <h2>Состояние</h2>
   <div id="count" class="stat">Кирпичей на сцене: 0</div>
   <div id="info" class="info">Ничего не выделено.<br>Кликните по кирпичу левой кнопкой.</div>
 
-  <h2>Памятка по управлению</h2>
-  <ul class="help">
-    <li><kbd>ЛКМ</kbd> по кирпичу — выделить; тянуть — переставить по сетке</li>
-    <li><kbd>ПКМ</kbd> — вращать камеру, <kbd>колесо</kbd> — масштаб</li>
-    <li><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> — вращение камеры</li>
-    <li><kbd>C</kbd> — создать кирпич (дубль кнопки «Создать кирпич»)</li>
-    <li>При перетаскивании: <kbd>Shift</kbd> + движение мыши — подъём/спуск по оси Y; <kbd>колесо</kbd> — шаг на ряд (65 мм)</li>
-    <li><kbd>X</kbd> — поворот вокруг оси X на 90°</li>
-    <li><kbd>Y</kbd> или <kbd>R</kbd> — поворот вокруг оси Y на 90°</li>
-    <li><kbd>Z</kbd> — поворот вокруг оси Z на 90°</li>
-    <li><kbd>PageUp</kbd> / <kbd>PageDown</kbd> — поднять/опустить выделенный кирпич на ряд</li>
-    <li><kbd>Delete</kbd> / <kbd>Backspace</kbd> — удалить выделенный кирпич</li>
-    <li><kbd>Esc</kbd> — снять выделение</li>
-  </ul>
   <div class="note">
     Новый кирпич появляется рядом с существующими, не перекрывая их.
     При отпускании мыши кирпич встаёт на сетку 62.5 мм (края — точно на линии)
@@ -52,9 +48,25 @@
   </div>
 </div>
 
+<div id="help-corner">
+  <ul class="help">
+    <li><kbd>ЛКМ</kbd> — выделить / переставить по сетке</li>
+    <li><kbd>ПКМ</kbd> — вращать камеру, <kbd>колесо</kbd> — масштаб</li>
+    <li><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> — вращение камеры</li>
+    <li><kbd>C</kbd> — создать кирпич (дубль кнопки «Создать кирпич»)</li>
+    <li>При перетаскивании: <kbd>Shift</kbd> + мышь — подъём/спуск по Y; <kbd>колесо</kbd> — шаг на ряд (65 мм)</li>
+    <li><kbd>X</kbd> / <kbd>Y</kbd>, <kbd>R</kbd> / <kbd>Z</kbd> — повороты на 90°</li>
+    <li><kbd>PageUp</kbd> / <kbd>PageDown</kbd> — ряд вверх / вниз</li>
+    <li><kbd>Delete</kbd> / <kbd>Backspace</kbd> — удалить выделенный</li>
+    <li><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> — отменить / вернуть</li>
+    <li><kbd>Esc</kbd> — снять выделение</li>
+  </ul>
+</div>
+
 <script src="js/libs/three.min.js"></script>
 <script src="js/libs/OrbitControls.js"></script>
 <script src="js/libs/js-yaml.min.js"></script>
-<script src="js/app/app.js"></script>
+<script src="js/libs/jspdf.umd.min.js"></script>
+<script defer src="js/app/main.js"></script>
 </body>
 </html>

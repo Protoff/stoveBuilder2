@@ -37,35 +37,41 @@
 ```
 stoveBuilder2/
 ├── index.html              — единственная точка входа, все подключения локальные
+├── setup.js                — автоскрипт скачивания библиотек (Node, ES5, без зависимостей)
 ├── промт печка              — исходный промпт-ТЗ (перечитывать при изменении требований)
 ├── AGENTS.md               — этот файл
 ├── js/
 │   ├── libs/
 │   │   ├── three.min.js         (Three.js r128, ~603 KB, UMD)
 │   │   ├── OrbitControls.js     (официальный контрол, ~26 KB, THREE.OrbitControls)
-│   │   └── js-yaml.min.js       (js-yaml ~4.x, ~39 KB, глобальный jsyaml)
+│   │   ├── js-yaml.min.js       (js-yaml ~4.x, ~39 KB, глобальный jsyaml)
+│   │   └── jspdf.umd.min.js     (jsPDF 2.5.1, ~364 KB, глобальный window.jspdf)
 │   └── app/
-│       └── app.js                — весь код приложения (одна IIFE, ~700 строк, без комментариев)
+│       └── main.js              — весь код приложения (одна IIFE, без комментариев)
 └── css/
     ├── libs/                     — пусто (внешние CSS не используются)
     └── app/
-        └── style.css             — все стили (~70 строк)
+        └── style.css             — все стили
 ```
 
 Правила:
 
 - **Никаких CDN и внешних URL.** Промпт упоминает CDN, но требование «работать без
-  интернета» приоритетнее: библиотеки скачиваются в `js/libs/` и подключаются
-  относительными путями. В `index.html` не должно быть ни одного `http(s)://`.
+  интернета» приоритетнее: библиотеки скачиваются в `js/libs/` (вручную или
+  скриптом `node setup.js`, который тянет их с официальных CDN и кладёт в папки;
+  при наличии всех файлов выводит «Все библиотеки на месте, автономный режим
+  готов») и подключаются относительными путями. В `index.html` не должно быть
+  ни одного `http(s)://`.
 - Порядок подscripts в конце `<body>` обязателен:
-  `three.min.js` → `OrbitControls.js` → `js-yaml.min.js` → `app/app.js`.
+  `three.min.js` → `OrbitControls.js` → `js-yaml.min.js` → `jspdf.umd.min.js` →
+  `app/main.js` (со `defer`).
 - Стиль: весь код без комментариев, `'use strict'`, ванильный ES5
   (var / function, без стрелок, классов, импортов), UI-тексты на русском.
-- Проверка синтаксиса: `node --check js/app/app.js`.
+- Проверка синтаксиса: `node --check js/app/main.js`, `node --check setup.js`.
 
 ---
 
-## 3. Физические/математические константы (app.js, начало IIFE)
+## 3. Физические/математические константы (main.js, начало IIFE)
 
 ```js
 var GRID  = 0.625;   // шаг сетки X/Z, юнитов (62.5 мм)
@@ -156,7 +162,8 @@ function round3(v)       { return Math.round(v * 1000) / 1000; }        // зн�
     свободная клетка рядом (кратная 0.625, т.е. уже «на сетке»).
     AABB существующих кешируются в массив `boxes` на один вызов.
   - `addStandardBrick()` = `selectBrick(createBrick({ type:'standard' }))` —
-    общая функция для кнопки «Создать кирпич» и клавиши **C**.
+    общая функция для кнопки «Создать кирпич» и клавиши **C**;
+    `addHalfBrick()` = то же для `type:'half'` (кнопка «Создать половинный»).
 - Поворот: `opts.rotation = [rx,ry,rz]` — каждый компонент через
   `normalizeAngle` (кратность 90°), затем `quaternion.setFromEuler`.
 - `scene.add`, `bricks.push`, `applySelectionVisual`, `updateUI`.
@@ -276,7 +283,8 @@ if ('y' in axes) {
 
 ### Клавиатура (bindKeyboard, на window)
 
-Игнор при зажатых Ctrl/Meta/Alt.
+Игнор при зажатых Meta/Alt; комбинации Ctrl+Z / Ctrl+Y (и Cmd+Z / Cmd+Y на
+macOS) обрабатываются **до** общего return по модификаторам.
 
 | Клавиша | Действие |
 |---|---|
@@ -288,6 +296,8 @@ if ('y' in axes) {
 | x | `rotateBrick(selected, 'x')` |
 | y или r | `rotateBrick(selected, 'y')` |
 | z | `rotateBrick(selected, 'z')` |
+| Ctrl+Z | `undo()` — откатить последнее изменение (см. раздел 10b) |
+| Ctrl+Y | `redo()` — вернуть откат (см. раздел 10b) |
 
 Вращения недоступны, пока ничего не выделено или идёт drag.
 `var lower = k.toLowerCase()` вычисляется сразу после Esc — обработчик `c`
@@ -337,18 +347,25 @@ snapBrick(brick, 'xyz');              // пересчёт по НОВОМУ AABB
     `#btn-add-half.btn` «Создать половинный кирпич»,
     `#btn-delete.btn.danger` «Удалить выделенный» (`disabled` без выделения);
   - секция «Проект (.stove / YAML)»: `#btn-save.btn.success` «Сохранить проект»,
-    `#btn-load.btn` «Загрузить проект», скрытый `#file-input`
+    `#btn-load.btn` «Загрузить проект», `#btn-clear.btn.danger` «Очистить всё»
+    (см. раздел 10b), скрытый `#file-input`
     (`accept=".stove,.yaml,.yml"`, `display:none`);
+  - секция «История»: `.history-row` (flex, gap 8px) с
+    `#btn-undo.btn` «◀ Отменить» и `#btn-redo.btn` «Вперед ▶»
+    (оба `disabled`; см. раздел 10b);
+  - секция «Порядовка (PDF)»: `#btn-pdf.btn.primary` «Скачать порядовку (PDF)»
+    — генерирует PDF с видами сверху по рядам (см. раздел 10a);
   - секция «Состояние»: `#count.stat` «Кирпичей на сцене: N»,
     `#info.info` — либо «Ничего не выделено.<br>Кликните по кирпичу левой кнопкой.»,
     либо `<b>Ярлык типа</b><br>Позиция: X 0.00 · Y 0.33 · Z 0.00<br>Поворот: 90° / 0° / 0°`
     (координаты через `fmt = toFixed(2)`, углы через `deg()`, разделитель «·»);
-  - секция «Памятка по управлению» (`ul.help`, элементы `kbd`):
+  - памятка по управлению вынесена в `#help-corner` (правый нижний угол, поверх
+    сцены, `pointer-events:none`): `ul.help` с `kbd`-элементами —
     ЛКМ выделить/тянуть; ПКМ — камера, колесо — масштаб; стрелки — камера;
     **C — создать кирпич** (дубль кнопки); Shift+мышь — подъём/спуск,
     колесо во время драга — шаг на ряд (65 мм);
     X / Y или R / Z — повороты 90°; PageUp/PageDown — ряд; Delete/Backspace —
-    удалить; Esc — снять выделение;
+    удалить; Ctrl+Z / Ctrl+Y — отменить/вернуть; Esc — снять выделение.
   - `.note`: текст про спавн нового кирпича рядом с существующими (не перекрывая),
     снап на сетку 62.5 мм (края на линии), магнит
     (встык, выравнивание граней, постановка сверху), высота ряда строго 65 мм,
@@ -358,6 +375,8 @@ snapBrick(brick, 'xyz');              // пересчёт по НОВОМУ AABB
 
 - `elCount.textContent = 'Кирпичей на сцене: ' + bricks.length;`
 - `btnDelete.disabled = !selected;`
+- `btnUndo.disabled = undoStack.length <= 1;` (нет изменений для отката)
+- `btnRedo.disabled = redoStack.length === 0;`
 - `elInfo` — см. выше; позиция читается из `selected.mesh.position`,
   поворот из `selected.mesh.rotation` (компоненты rad → `deg()`).
 
@@ -369,6 +388,9 @@ snapBrick(brick, 'xyz');              // пересчёт по НОВОМУ AABB
 - Удалить → `removeBrick(selected)`;
 - Сохранить → `saveProject()`;
 - Загрузить → `fileInput.click()`;
+- «Очистить всё» → `clearAll()` (см. раздел 10b);
+- «◀ Отменить» → `undo()`; «Вперед ▶» → `redo()` (см. раздел 10b);
+- «Скачать порядовку (PDF)» → `downloadOrdersPDF()` (раздел 10a);
 - `fileInput change` → `FileReader.readAsText(file, 'utf-8')` →
   `loadProjectText(String(reader.result))`, затем `event.target.value = ''`
   (повторный выбор того же файла возможен); ошибки — `alert()`.
@@ -409,6 +431,161 @@ bricks:
 
 ---
 
+## 10a. Порядовка (PDF)
+
+Кнопка **«Скачать порядовку (PDF)»** (`#btn-pdf` → `downloadOrdersPDF()`). Библиотека —
+`window.jspdf.jsPDF` (jsPDF 2.5.1, `jspdf.umd.min.js`, глобальный объект `window.jspdf`).
+
+`downloadOrdersPDF()`:
+
+1. Пустая сцена (`bricks.length === 0`) → `alert('На сцене нет кирпичей — порядовку строить не из чего.')`.
+2. Нет `window.jspdf.jsPDF` → alert про `js/libs/jspdf.umd.min.js`.
+3. **Один проход по ВСЕМ кирпичам** — строит и фундамент, и ряды:
+   - `brick.mesh.updateMatrixWorld(true)`, затем `THREE.Box3().setFromObject(mesh)` —
+     мировой AABB (защита от устаревшего `matrixWorld`);
+   - **контур основания (фундамент)**: глобальные `minX/maxX/minZ/maxZ` по всем
+     кирпичам сцены (не по ряду!) — периметр печи в проекции сверху;
+   - `box.getSize(size)` + `box.getCenter(center)` → номер ряда —
+     `rowHeightLevel(center.y, size.y / 2)`, уровень `rows[level]`.
+   Уровни сортируются по возрастанию.
+4. `new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })` —
+   A4 альбомная (страница 297×210 мм).
+5. На каждый уровень — отдельная страница (первая без `addPage()`),
+   `drawRowPage(doc, level, items, minX, maxX, minZ, maxZ)` — параметры фундамента
+   **общие для всех страниц** (единый масштаб и привязка осей на верхних рядах).
+
+`rowHeightLevel(centerY, halfH)` — группировка рядов **по низу AABB через центр**:
+`bottomY = round2(centerY − halfH)` (округление до 2 знаков), затем
+`level = Math.round(bottomY / ROW)`; если `|bottomY − level·ROW| ≤ PDF_EPSILON = 0.05`
+— кирпич относится к этому уровню (кирпичи одного ряда гарантированно на одной
+странице, float-шум 0.6499996/0.6500004 не расщепляет ряд), иначе — ближайший
+уровень.
+
+`nearestStdSize(v)` — нормализация габарита к стандартным величинам кирпича из
+`BRICK_STD_SIZES = [2.5, 1.25, 0.65]` (ближайший по модулю разности): устраняет
+float-искажение 2.5000001/0.6499996 и раздувание кирпичей, поставленных на ребро.
+
+`drawRowPage(doc, level, items, minX, maxX, minZ, maxZ)` — вид сверху на ряд,
+**масштаб и центрирование от фундамента всей печи** (не от текущего ряда):
+
+- Поля `margin = 15`, заголовок `headerH = 26`.
+- `spanX/spanZ` — по ГАБАРИТАМ ФУНДАМЕНТА (минимум 1, чтобы не делить на 0).
+- `scale = min(availW / spanX, availH / spanZ)` — вся печь помещается на лист
+  целиком и центрируется; на верхних рядах привязка к осям/элементам печи
+  не теряется (те же minX/minZ и scale на каждой странице).
+- Заголовок: `'Ряд № ' + (level + 1)` — **с пробелом после №** (жирный, 18 pt),
+  под ним мелким (9 pt, серым #5a5a5a):
+  `'Масштаб: 1 юнит = ' + pdfScale(scale) + ' мм · кирпич 250×125×65 мм (вид сверху)'`.
+- **Фоновый контур основания** — ПЕРВЫМ, до кирпичей ряда:
+  `setDrawColor(176,176,176)` (светло-серый #b0b0b0), `setLineWidth(0.2)`,
+  `setLineDashPattern([2, 2], 0)` (пунктир), `doc.rect(..., 'S')` —
+  периметр фундамента как бледный ориентир на верхних рядах;
+  затем `setLineDashPattern([], 0)` (сброс пунктира).
+- Каждый кирпич — **залитый прямоугольник** (тело видно, пустые каналы белые):
+  `setDrawColor(0,0,0)`, `setLineWidth(0.5)` (чёткая чёрная обводка — видна
+  перевязка швов), `setFillColor(224,224,224)` (светло-серый #e0e0e0),
+  `doc.rect(x, y, w, h, 'FD')`.
+- Габариты кирпича — **строго по мировому AABB**: `box.setFromObject(mesh)` →
+  `box.getSize(size)` (ширина = `size.x` по X, длина = `size.z` по Z), затем
+  **нормализация** `nearestStdSize(...)` для каждой стороны; центр —
+  `box.getCenter(center)`, дополнительно снапится к сетке 0.625
+  (`snapTo(clean(center.x), GRID)` и по Z) — привязка к глобальной сетке.
+  Прямоугольник рисуется от центра: `x = offX + (cx − minX)·scale − w/2`,
+  `y = offZ + (cz − minZ)·scale − h/2`. Повёрнутые на ребро кирпичи корректны
+  (size.x или size.z нормализуется к 0.65), поворот на ~Y меняет местами w/h.
+
+`pdfScale(v) = Math.round(v * 100) / 100` — округление масштаба до 2 знаков.
+`round2(v) = Math.round(v * 100) / 100` — округление до 2 знаков.
+
+Сохранение: `doc.save('poryadovka.pdf')` (имя фиксированное, как `pechka.stove`).
+
+---
+
+## 10b. Автосохранение (localStorage) и история (Undo/Redo)
+
+Кнопка **«Очистить всё»** (`#btn-clear` → `clearAll()`) и секция **«История»**
+(`#btn-undo` «◀ Отменить» → `undo()`, `#btn-redo` «Вперед ▶» → `redo()`).
+Автосохранение: ключ `STORAGE_KEY = 'stove_current_project'` в localStorage;
+восстановление при инициализации.
+
+Константы и состояние:
+
+```js
+var STORAGE_KEY = 'stove_current_project'; // автосохранение
+var MAX_HISTORY = 20;    // максимум снимков истории
+var undoStack = [];      // снимки YAML: [0] — стартовое состояние,
+                         // последний элемент — ТЕКУЩЕЕ состояние сцены
+var redoStack = [];      // снимки для redo (очищается при каждом изменении)
+```
+
+Снимки хранятся как **строки YAML** (тот же `buildProjectDoc`, что и для файла),
+поэтому undo/redo полностью восстанавливают и типы, и позиции, и повороты.
+
+Storage-утилиты (все в try/catch — переживают node-харнесс без localStorage):
+
+- `storageGet(key)` → строка или `null`; `storageSet(key, val)` — запись;
+  `storageRemove(key)` — удаление. `saveToLocalStorage()` =
+  `storageSet(STORAGE_KEY, projectToYaml())`.
+
+Запись в историю (вызывается ПОСЛЕ каждого необратимого изменения):
+
+- `historyPush(snapshot)` — `undoStack.push(snapshot)`, переполнение:
+  `while (undoStack.length > MAX_HISTORY) undoStack.shift()`.
+- `recordSceneChange()` — ядро: `historyPush(projectToYaml())`, сброс
+  `redoStack = []`, `saveToLocalStorage()`, `updateUI()`.
+  Вызывается из: `addStandardBrick`, `addHalfBrick`, `removeBrick`,
+  `rotateBrick`, `liftBrick`, `clearAll` (через `historyPush`), pointerup
+  (только если `drag.moved`), wheel-шаг при драге, `loadProjectText`
+  (после успешной загрузки).
+- `historyInit()` — стартовый снимок (`undoStack = [projectToYaml()]`,
+  `redoStack = []`, `updateUI()`).
+
+Undo/Redo:
+
+- `undo()` — если `undoStack.length <= 1` — return (нечего откатывать);
+  иначе последний снимок → `redoStack.push(...)` (порядок: откат кладёт
+  текущее состояние в redoStack, затем применяет предыдущее), применить:
+  `restoreFromYamlString(undoStack[undoStack.length - 1])`, `updateUI()`.
+- `redo()` — если `redoStack.length === 0` — return; иначе снимок из
+  `redoStack.pop()` → `undoStack.push(...)` → `restoreFromYamlString(...)`,
+  `updateUI()`.
+
+Восстановление снимка — `restoreFromYamlString(text)`: `jsyaml.load` в
+try/catch, передаёт результат в `applyProjectData(data)` (см. ниже — общая
+функция загрузки), разница с `loadProjectText`: ошибки парсинга молча
+глотаются (внутренний формат, не пользовательский файл).
+
+`clearAll()` — полная очистка сцены:
+
+```js
+function clearAll() {
+  if (bricks.length === 0) return; // трогать историю нечего
+  clearBricks();                   // сброс drag/selected, dispose всех
+  historyPush(projectToYaml());    // снимок ПОСЛЕ очистки
+  storageRemove(STORAGE_KEY);      // автосохранение сбрасывается
+  updateUI();
+}
+```
+
+Восстановление при инициализации (в `init()`, ДО `historyInit()`):
+
+- `restoreFromLocalStorage()` — если в localStorage есть сохранённый проект
+  (`storageGet(STORAGE_KEY)`), восстанавливает его через `restoreFromYamlString`;
+  иначе — ничего не делает (стартуем с пустой сцены).
+
+Проверенные сценарии:
+
+- `C, C, PageUp` → стек: [пусто, 1 кирпич, 2 кирпича, 2 с подъёмом];
+  Ctrl+Z откатывает PageUp → 2 кирпича; второй Ctrl+Z → 1 кирпич;
+  Ctrl+Y возвращает обратно в той же последовательности.
+- После Undo всегда доступен Redo; после НОВОГО изменения `redoStack`
+  очищается (классическое поведение).
+- `clearAll()` доступен всегда (при пустой сцене — no-op); после него
+  undo возвращает очищенную сцену, а `stove_current_project` в localStorage
+  отсутствует.
+
+---
+
 ## 11. CSS (css/app/style.css)
 
 Тёмная тема, кратко по ключевым значениям:
@@ -430,22 +607,29 @@ bricks:
   - `.danger` `#5a2a2a` / hover `#6b3232`; `:disabled` — нейтральный `#2a2f38`.
 - `.info`: 13px, фон `#1a1f27`, border `#2b323d`, radius 8, min-height 54px,
   `font-variant-numeric: tabular-nums`; `b` — `#ffb454`.
+- `.history-row`: flex, gap 8px; кнопки в нём — flex:1, padding 6/8, 13px,
+  text-align center (две кнопки «◀ Отменить»/«Вперед ▶» в одну строку).
 - `.help`: list-style none, 12.5px; `kbd` — фон `#0f1319`, border `#3b4453`,
   radius 4, padding 0 5px, 11px.
 - `.note`: 11.5px `#7f8a97`.
 - `#badge`: absolute top 12 right 14, z-index 5, фон `rgba(20,24,31,.85)`,
   border `#323a46`, radius 8, 12px; `b` — `#ffb454`; `pointer-events:none`.
-- Media ≤720px: sidebar во всю ширину сверху, max-height 45%.
+- `#help-corner`: absolute right 14 bottom 12, z-index 5, `pointer-events:none`,
+  фон `rgba(20,24,31,.85)`, border `#323a46`, radius 8, padding 8 12.
+- Media ≤720px: sidebar во всю ширину сверху, max-height 45%; `#help-corner` скрыт.
 
 ---
 
 ## 12. Порядок инициализации
 
-В конце IIFE: `init();` — и больше ничего. `init` берёт DOM-хэндлы, строит сцену,
-вешает обработчики (`bindUI`, `bindPointer`, `bindKeyboard`, `resize`),
-`updateUI()`, запускает `setAnimationLoop`. Состояние: `bricks[]`,
-`selected`, `drag`, `pointerNDC` — замыкание, глобального состояния нет
-(кроме `THREE`/`jsyaml`/`THREE.OrbitControls` из libs).
+В конце IIFE: `init();` — и больше ничего. `init` берёт DOM-хэндлы (включая
+`btn-clear`, `btn-undo`, `btn-redo`), строит сцену, вешает обработчики
+(`bindUI`, `bindPointer`, `bindKeyboard`, `resize`), `updateUI()`,
+затем `restoreFromLocalStorage()` (если есть автосохранение) и
+`historyInit()` (стартовый снимок истории), запускает `setAnimationLoop`.
+Состояние: `bricks[]`, `selected`, `drag`, `pointerNDC`, `undoStack`,
+`redoStack` — замыкание, глобального состояния нет
+(кроме `THREE`/`jsyaml`/`window.jspdf`/`THREE.OrbitControls` из libs).
 
 ---
 
@@ -477,7 +661,7 @@ bricks:
 
 ## 14. Как проверять, что проект в порядке
 
-1. `node --check js/app/app.js` — синтаксис.
+1. `node --check js/app/main.js` — синтаксис; то же для `setup.js`.
 2. `grep -c 'src="http\|href="http' index.html` → должно быть **0** (офлайн).
 3. Структура каталогов — раздел 2, порядок подключения скриптов — раздел 2.
 4. Ручная smoke-проверка в браузере (file://):
@@ -490,28 +674,44 @@ bricks:
      и не висит в воздухе (края на сетке);
    - второй кирпич рядом → при отпускании примагничивается встык/сверху
      (x: 0.2→0, 2.7→2.5; y сверху → 0.975 при низе соседа 0.65);
-   - сохранить → открывалка файла `pechka.stove`; загрузить — сцена восстанавливается
-     точь-в-точь, выделение снято;
-   - рёбра чёрные, швы видны, небо ~#8fb0d3, земля ~#c9c4b8.
-5. Автотесты гоняются headless-фотографией оверлея: **58 проверок** (spawn в центре
-   при пустой сцене, края на сетке после каждой операции, drag, повороты, магнит,
-   YAML, спавн-вне-существующих + клавиша C, пиксели: небо/земля/красные пиксели/
-   тёмные рёбра) — при доработках тест-оверлей воспроизводится по разделу 13.4.
-   Ожидание «half spawns at center» валидно, только если первый кирпич уже увлечён
-   drag'ом из центра (иначе half встанет рядом — это норма нового спавна).
+- сохранить → открывалка файла `pechka.stove`; загрузить — сцена восстанавливается
+      точь-в-точь, выделение снято;
+   - создать 2–3 кирпича, изменить их (подъём/поворот/сдвиг) → Ctrl+Z / Ctrl+Y
+     и кнопки «◀ Отменить»/«Вперед ▶» откатывают/возвращают каждое изменение;
+     «Очистить всё» → пустая сцена, undo возвращает её обратно; после перезагрузки
+     страницы (F5) сцена восстанавливается из автосохранения;
+   - «Скачать порядовку (PDF)» → скачивается `poryadovka.pdf` с видами сверху
+     по рядам (страница на ряд, заголовок «Ряд №N», белые кирпичи с чёрной рамкой);
+   - рёбра чёрные, швы видны, небо ~#8fb0d3, земля ~#c9c4b8 (с сеткой и тенями
+     в реальном рендере читается ~#9d9c99–#e5d8c1 — допуск широкий);
+   - памятка по клавишам — в правом нижнем углу (`#help-corner`), не мешает кликам.
+5. Автотесты гоняются headless-фотографией оверлея: node-харнесс **132 проверки**
+   (spawn в центре при пустой сцене, края на сетке после каждой операции, drag,
+   повороты, магнит, YAML, спавн-вне-существующих + клавиша C, PDF-стаб: пустая
+   сцена → alert, страница на ряд с заголовками «Ряд №N», прямоугольники-AABB,
+   `poryadovka.pdf`, история: undo/redo/лимит 20/очистка redoStack, автосохранение,
+   `clearAll` + удаление ключа, невосстановление после `clearAll` при init;
+   пиксели: небо/земля/красные/оранжевые/чёрные рёбра) — при доработках тест-оверлей
+   воспроизводится по разделу 13.4. Ожидание «half spawns at center» валидно, только
+   если первый кирпич уже увлечён drag'ом из центра (иначе half встанет рядом —
+   это норма нового спавна). Реальный jsPDF в браузере отдаёт страницу
+   `297.000…×210.001…` мм, а не ровно 297/210 — проверять «w>h, размер ≥ A4»,
+   а не точное равенство.
 
 ---
 
 ## 15. Чек-лист воссоздания с нуля
 
-1. Создать дерево раздела 2, скачать три libs (r128-совместимые:
+1. Создать дерево раздела 2, скачать четыре libs (r128-совместимые:
    `three.min.js` r128, `OrbitControls.js` из examples/jsm-UMD-версии,
-   `js-yaml.min.js`).
+   `js-yaml.min.js`, `jspdf.umd.min.js`) — вручную или `node setup.js`.
 2. Написать `index.html` по разделу 8 (язык ru, viewport, badge, sidebar с
-   кнопками/info/памяткой/note, 4 script-тега в конце body).
+   кнопками/info/help-corner/note, секция «История», 5 script-тегов в конце body:
+   три js-libs + jspdf + `main.js` со `defer`).
 3. Написать `style.css` по разделу 11.
-4. Написать `app.js` по разделам 3–10 в указанном порядке функций
+4. Написать `main.js` по разделам 3–10b в указанном порядке функций
    (константы → утилиты → init/animate/resize → NDC/pick/AABB/snap/magnet →
    spawn/create/dispose/remove/clear → selection → rotate/lift →
-   pointer/keyboard/UI → save/load → updateUI → `init()`).
+   pointer/keyboard/UI → save/load → PDF → history (undo/redo) → updateUI →
+   `init()`).
 5. Прогнать раздел 14.

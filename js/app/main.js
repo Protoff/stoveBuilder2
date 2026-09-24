@@ -21,8 +21,13 @@
   var selected = null;
   var drag = null;
   var pointerNDC = new THREE.Vector2();
+  var undoStack = [];
+  var redoStack = [];
+  var STORAGE_KEY = 'stove_current_project';
+  var MAX_HISTORY = 20;
 
-  var elCount, elInfo, btnAdd, btnAddHalf, btnDelete, btnSave, btnLoad, fileInput, viewport;
+  var elCount, elInfo, btnAdd, btnAddHalf, btnDelete, btnSave, btnLoad, btnPdf;
+  var btnUndo, btnRedo, btnClear, fileInput, viewport;
 
   function clean(v) { return Math.round(v * 1e6) / 1e6; }
   function snapTo(v, step) { return Math.round(v / step) * step; }
@@ -43,6 +48,10 @@
     btnDelete = document.getElementById('btn-delete');
     btnSave = document.getElementById('btn-save');
     btnLoad = document.getElementById('btn-load');
+    btnPdf = document.getElementById('btn-pdf');
+    btnUndo = document.getElementById('btn-undo');
+    btnRedo = document.getElementById('btn-redo');
+    btnClear = document.getElementById('btn-clear');
     fileInput = document.getElementById('file-input');
 
     scene = new THREE.Scene();
@@ -109,6 +118,8 @@
     window.addEventListener('resize', onResize);
 
     updateUI();
+    restoreFromLocalStorage();
+    historyInit();
     renderer.setAnimationLoop(animate);
   }
 
@@ -271,6 +282,12 @@
 
   function addStandardBrick() {
     selectBrick(createBrick({ type: 'standard' }));
+    recordSceneChange();
+  }
+
+  function addHalfBrick() {
+    selectBrick(createBrick({ type: 'half' }));
+    recordSceneChange();
   }
 
   function createBrick(opts) {
@@ -340,6 +357,7 @@
     if (selected === brick) selected = null;
     disposeBrick(brick);
     updateUI();
+    recordSceneChange();
   }
 
   function clearBricks() {
@@ -350,6 +368,12 @@
     selected = null;
     while (bricks.length) disposeBrick(bricks.pop());
     updateUI();
+  }
+
+  function clearAll() {
+    clearBricks();
+    historyPush();
+    storageRemove(STORAGE_KEY);
   }
 
   function applySelectionVisual(brick) {
@@ -388,6 +412,7 @@
     brick.mesh.quaternion.setFromEuler(brick.mesh.rotation);
     snapBrick(brick, 'xyz');
     updateUI();
+    recordSceneChange();
   }
 
   function liftBrick(brick, direction) {
@@ -395,6 +420,7 @@
     brick.mesh.position.y += direction * brick.def.h;
     snapBrick(brick, 'y');
     updateUI();
+    recordSceneChange();
   }
 
   function bindPointer() {
@@ -487,10 +513,12 @@
     window.addEventListener('pointerup', function (event) {
       if (!drag) return;
       if (event.button !== 0) return;
+      var moved = drag.moved;
       magnetSnap(drag.brick);
       controls.enabled = true;
       renderer.domElement.style.cursor = 'default';
       drag = null;
+      if (moved) recordSceneChange();
       updateUI();
     });
 
@@ -503,6 +531,7 @@
       snapBrick(brick, 'y');
       drag.startY = brick.mesh.position.y;
       drag.startNDCy = pointerNDC.y;
+      recordSceneChange();
       updateUI();
     }, { passive: false });
   }
@@ -519,6 +548,11 @@
 
   function bindKeyboard() {
     window.addEventListener('keydown', function (event) {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        var ck = event.key.toLowerCase();
+        if (ck === 'z') { event.preventDefault(); undo(); return; }
+        if (ck === 'y') { event.preventDefault(); redo(); return; }
+      }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       var k = event.key;
 
@@ -565,16 +599,18 @@
 
   function bindUI() {
     btnAdd.addEventListener('click', addStandardBrick);
-    btnAddHalf.addEventListener('click', function () {
-      selectBrick(createBrick({ type: 'half' }));
-    });
+    btnAddHalf.addEventListener('click', addHalfBrick);
     btnDelete.addEventListener('click', function () {
       if (selected) removeBrick(selected);
     });
+    btnUndo.addEventListener('click', undo);
+    btnRedo.addEventListener('click', redo);
+    btnClear.addEventListener('click', clearAll);
     btnSave.addEventListener('click', saveProject);
     btnLoad.addEventListener('click', function () {
       fileInput.click();
     });
+    btnPdf.addEventListener('click', downloadOrdersPDF);
     fileInput.addEventListener('change', function (event) {
       var file = event.target.files && event.target.files[0];
       if (!file) return;
@@ -588,8 +624,20 @@
 
   function round3(v) { return Math.round(v * 1000) / 1000; }
 
-  function saveProject() {
-    var doc = {
+  function storageGet(key) {
+    try { return window.localStorage.getItem(key); } catch (e) { return null; }
+  }
+
+  function storageSet(key, value) {
+    try { window.localStorage.setItem(key, value); } catch (e) {}
+  }
+
+  function storageRemove(key) {
+    try { window.localStorage.removeItem(key); } catch (e) {}
+  }
+
+  function buildProjectDoc() {
+    return {
       format: 'stove-project',
       version: 1,
       created: new Date().toISOString(),
@@ -611,16 +659,30 @@
         };
       })
     };
+  }
 
-    var yaml;
+  function projectToYaml() {
+    var result = { ok: false, yaml: null, error: null };
     try {
-      yaml = jsyaml.dump(doc, { noRefs: true, indent: 2, lineWidth: -1 });
+      result.yaml = jsyaml.dump(buildProjectDoc(), { noRefs: true, indent: 2, lineWidth: -1 });
+      result.ok = true;
     } catch (e) {
-      alert('Не удалось сформировать YAML: ' + e.message);
+      result.error = e.message;
+    }
+    return result;
+  }
+
+  function currentYaml() {
+    return projectToYaml().yaml;
+  }
+
+  function saveProject() {
+    var r = projectToYaml();
+    if (!r.ok) {
+      alert('Не удалось сформировать YAML: ' + r.error);
       return;
     }
-
-    var blob = new Blob([yaml], { type: 'application/x-yaml;charset=utf-8' });
+    var blob = new Blob([r.yaml], { type: 'application/x-yaml;charset=utf-8' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
@@ -629,6 +691,81 @@
     a.click();
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function saveToLocalStorage() {
+    var yaml = currentYaml();
+    if (yaml !== null) storageSet(STORAGE_KEY, yaml);
+  }
+
+  function recordSceneChange() {
+    var yaml = currentYaml();
+    if (yaml === null) return;
+    undoStack.push(yaml);
+    redoStack.length = 0;
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    saveToLocalStorage();
+    updateUI();
+  }
+
+  function historyPush() {
+    var yaml = currentYaml();
+    if (yaml === null) return;
+    undoStack.push(yaml);
+    redoStack.length = 0;
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    updateUI();
+  }
+
+  function undo() {
+    if (undoStack.length <= 1) return;
+    redoStack.push(undoStack.pop());
+    restoreFromYamlString(undoStack[undoStack.length - 1]);
+    updateUI();
+  }
+
+  function redo() {
+    if (!redoStack.length) return;
+    undoStack.push(redoStack.pop());
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    restoreFromYamlString(undoStack[undoStack.length - 1]);
+    updateUI();
+  }
+
+  function applyProjectData(data) {
+    clearBricks();
+    var loaded = 0;
+    var skipped = 0;
+    for (var i = 0; i < data.bricks.length; i++) {
+      var item = data.bricks[i];
+      if (!item || typeof item !== 'object') { skipped++; continue; }
+      var type = BRICK_TYPES[item.type] ? item.type : 'standard';
+      var p = item.position || {};
+      var r = item.rotation || {};
+      var px = Number(p.x), py = Number(p.y), pz = Number(p.z);
+      if (![px, py, pz].every(Number.isFinite)) { skipped++; continue; }
+      createBrick({
+        type: type,
+        position: [px, py, pz],
+        rotation: [Number(r.x) || 0, Number(r.y) || 0, Number(r.z) || 0]
+      });
+      loaded++;
+    }
+    selectBrick(null);
+    updateUI();
+    return { loaded: loaded, skipped: skipped };
+  }
+
+  function restoreFromYamlString(text) {
+    var data;
+    try {
+      data = jsyaml.load(text);
+    } catch (e) {
+      return false;
+    }
+    if (!data || typeof data !== 'object' || !Array.isArray(data.bricks)) return false;
+    applyProjectData(data);
+    return true;
   }
 
   function loadProjectText(text) {
@@ -643,41 +780,157 @@
       alert('Файл не похож на проект печи: нет списка bricks.');
       return;
     }
-
-    clearBricks();
-
-    var loaded = 0;
-    var skipped = 0;
-
-    for (var i = 0; i < data.bricks.length; i++) {
-      var item = data.bricks[i];
-      if (!item || typeof item !== 'object') { skipped++; continue; }
-
-      var type = BRICK_TYPES[item.type] ? item.type : 'standard';
-      var p = item.position || {};
-      var r = item.rotation || {};
-      var px = Number(p.x), py = Number(p.y), pz = Number(p.z);
-      if (![px, py, pz].every(Number.isFinite)) { skipped++; continue; }
-
-      createBrick({
-        type: type,
-        position: [px, py, pz],
-        rotation: [Number(r.x) || 0, Number(r.y) || 0, Number(r.z) || 0]
-      });
-      loaded++;
+    var result = applyProjectData(data);
+    recordSceneChange();
+    if (result.skipped > 0) {
+      alert('Загружено кирпичей: ' + result.loaded + '. Пропущено записей: ' + result.skipped + '.');
     }
+  }
 
-    selectBrick(null);
+  function restoreFromLocalStorage() {
+    var saved = storageGet(STORAGE_KEY);
+    if (saved === null || saved === '') return;
+    restoreFromYamlString(saved);
+  }
+
+  function historyInit() {
+    var yaml = currentYaml();
+    if (yaml !== null) undoStack.push(yaml);
     updateUI();
+  }
 
-    if (skipped > 0) {
-      alert('Загружено кирпичей: ' + loaded + '. Пропущено записей: ' + skipped + '.');
+  var PDF_EPSILON = 0.05;
+  var BRICK_STD_SIZES = [2.5, 1.25, 0.65];
+
+  function pdfScale(v) { return Math.round(v * 100) / 100; }
+
+  function nearestStdSize(v) {
+    var best = BRICK_STD_SIZES[0];
+    var bestDiff = Math.abs(v - best);
+    for (var s = 1; s < BRICK_STD_SIZES.length; s++) {
+      var d = Math.abs(v - BRICK_STD_SIZES[s]);
+      if (d < bestDiff) { bestDiff = d; best = BRICK_STD_SIZES[s]; }
     }
+    return best;
+  }
+
+  function rowHeightLevel(centerY, halfH) {
+    var bottomY = round2(centerY - halfH);
+    var level = Math.round(bottomY / ROW);
+    var diff = Math.abs(bottomY - level * ROW);
+    if (diff <= PDF_EPSILON) return level;
+    return Math.round(bottomY / ROW);
+  }
+
+  function round2(v) { return Math.round(v * 100) / 100; }
+
+  function drawRowPage(doc, level, items, baseMinX, baseMaxX, baseMinZ, baseMaxZ) {
+    var margin = 15;
+    var headerH = 26;
+    var pageW = doc.internal.pageSize.getWidth();
+    var pageH = doc.internal.pageSize.getHeight();
+
+    var spanX = baseMaxX - baseMinX;
+    var spanZ = baseMaxZ - baseMinZ;
+    if (spanX === 0) spanX = 1;
+    if (spanZ === 0) spanZ = 1;
+
+    var availW = pageW - margin * 2;
+    var availH = pageH - margin * 2 - headerH;
+    var scale = Math.min(availW / spanX, availH / spanZ);
+    var offX = margin + (availW - spanX * scale) / 2;
+    var offZ = margin + headerH + (availH - spanZ * scale) / 2;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text('Ряд № ' + (level + 1), margin, margin + 13);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(90, 90, 90);
+    doc.text('Масштаб: 1 юнит = ' + pdfScale(scale) + ' мм · кирпич 250×125×65 мм (вид сверху)', margin, margin + 19);
+    doc.setTextColor(0, 0, 0);
+
+    doc.setDrawColor(176, 176, 176);
+    doc.setLineWidth(0.2);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.rect(offX, offZ, spanX * scale, spanZ * scale, 'S');
+    doc.setLineDashPattern([], 0);
+
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.5);
+    doc.setFillColor(224, 224, 224);
+
+    var box = new THREE.Box3();
+    var size = new THREE.Vector3();
+    var center = new THREE.Vector3();
+    for (var j = 0; j < items.length; j++) {
+      var m = items[j].mesh;
+      m.updateMatrixWorld(true);
+      box.setFromObject(m);
+      box.getSize(size);
+      box.getCenter(center);
+      var w = nearestStdSize(size.x) * scale;
+      var h = nearestStdSize(size.z) * scale;
+      var cx = snapTo(clean(center.x), GRID);
+      var cz = snapTo(clean(center.z), GRID);
+      var x = offX + (cx - baseMinX) * scale - w / 2;
+      var y = offZ + (cz - baseMinZ) * scale - h / 2;
+      doc.rect(x, y, w, h, 'FD');
+    }
+  }
+
+  function downloadOrdersPDF() {
+    if (bricks.length === 0) {
+      alert('На сцене нет кирпичей — порядовку строить не из чего.');
+      return;
+    }
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      alert('Не загружена библиотека jsPDF (js/libs/jspdf.umd.min.js).');
+      return;
+    }
+
+    var baseMinX = Infinity, baseMaxX = -Infinity, baseMinZ = Infinity, baseMaxZ = -Infinity;
+    var rows = {};
+    var box = new THREE.Box3();
+    var size = new THREE.Vector3();
+    var center = new THREE.Vector3();
+
+    for (var i = 0; i < bricks.length; i++) {
+      var brick = bricks[i];
+      brick.mesh.updateMatrixWorld(true);
+      box.setFromObject(brick.mesh);
+      if (box.min.x < baseMinX) baseMinX = box.min.x;
+      if (box.max.x > baseMaxX) baseMaxX = box.max.x;
+      if (box.min.z < baseMinZ) baseMinZ = box.min.z;
+      if (box.max.z > baseMaxZ) baseMaxZ = box.max.z;
+      box.getSize(size);
+      box.getCenter(center);
+      var level = rowHeightLevel(center.y, size.y / 2);
+      if (!rows[level]) rows[level] = [];
+      rows[level].push(brick);
+    }
+
+    baseMinX = clean(baseMinX);
+    baseMaxX = clean(baseMaxX);
+    baseMinZ = clean(baseMinZ);
+    baseMaxZ = clean(baseMaxZ);
+
+    var levels = Object.keys(rows).map(Number).sort(function (a, b) { return a - b; });
+
+    var doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    for (var r = 0; r < levels.length; r++) {
+      if (r > 0) doc.addPage();
+      drawRowPage(doc, levels[r], rows[levels[r]], baseMinX, baseMaxX, baseMinZ, baseMaxZ);
+    }
+
+    doc.save('poryadovka.pdf');
   }
 
   function updateUI() {
     elCount.textContent = 'Кирпичей на сцене: ' + bricks.length;
     btnDelete.disabled = !selected;
+    btnUndo.disabled = undoStack.length <= 1;
+    btnRedo.disabled = redoStack.length === 0;
 
     if (!selected) {
       elInfo.innerHTML = 'Ничего не выделено.<br>Кликните по кирпичу левой кнопкой.';
